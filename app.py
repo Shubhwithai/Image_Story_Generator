@@ -1,3 +1,5 @@
+# app.py
+
 import streamlit as st
 import time
 import json
@@ -5,19 +7,18 @@ import random
 from datetime import datetime
 from typing import Dict, List, Tuple
 import together
-
-# Initialize Together AI client with API key from secrets
-together.api_key = st.secrets["TOGETHER_API_KEY"]
+from PIL import Image
+import requests
+from io import BytesIO
 
 class RateLimitHandler:
-    """Handle rate limiting with exponential backoff and request tracking."""
     def __init__(self):
         self.last_request_time = 0
         self.min_delay = 2
         self.max_delay = 30
         self.base_delay = 5
         self.max_retries = 3
-    
+
     def wait(self):
         current_time = time.time()
         elapsed = current_time - self.last_request_time
@@ -26,11 +27,11 @@ class RateLimitHandler:
             time.sleep(self.min_delay - elapsed + random.uniform(0.1, 1.0))
         
         self.last_request_time = time.time()
-    
+
     def handle_rate_limit(self, attempt: int):
         if attempt >= self.max_retries:
             raise Exception("Max retries exceeded")
-            
+        
         delay = min(self.base_delay * (2 ** attempt), self.max_delay)
         delay += random.uniform(0.1, 2.0)
         
@@ -61,14 +62,14 @@ def generate_story_prompts(topic: str) -> Dict[str, str]:
             "story_line_2": "image_prompt_2"
         }}"""
     }
-    
+
     def make_request():
         response = together.chat.completions.create(
             model="meta-llama/Llama-Vision-Free",
             messages=[prompt]
         )
         return json.loads(response.choices[0].message.content)
-    
+
     return safe_api_call(make_request)
 
 def generate_image(prompt: str) -> str:
@@ -78,7 +79,7 @@ def generate_image(prompt: str) -> str:
             prompt=prompt,
         )
         return response.data[0].url
-    
+
     return safe_api_call(make_request)
 
 def generate_story(image_prompt: str, story_line: str) -> str:
@@ -86,93 +87,101 @@ def generate_story(image_prompt: str, story_line: str) -> str:
     1. Scene description: {image_prompt}
     2. Story line: {story_line}
     Make the story vivid and descriptive, as if describing a scene from a painting."""
-    
+
     def make_request():
         response = together.chat.completions.create(
             model="meta-llama/Llama-Vision-Free",
             messages=[{"role": "user", "content": prompt}]
         )
         return response.choices[0].message.content
-    
+
     return safe_api_call(make_request)
 
-def create_multi_story_app(topic: str) -> List[Tuple[str, str, str]]:
-    results = []
+def create_multi_story_app(topic: str, progress_bar) -> List[Tuple[str, str, str]]:
+    try:
+        progress_bar.progress(0.1, "Generating story prompts...")
+        story_prompts = generate_story_prompts(topic)
+        
+        results = []
+        for i, (story_line, image_prompt) in enumerate(story_prompts.items(), 1):
+            try:
+                progress_bar.progress(0.2 + (i-1)*0.4, f"Generating image {i}...")
+                image_url = generate_image(image_prompt)
+
+                progress_bar.progress(0.3 + (i-1)*0.4, f"Generating story {i}...")
+                story = generate_story(image_prompt, story_line)
+
+                results.append((image_url, story_line, story))
+
+            except Exception as e:
+                st.error(f"Error processing story {i}: {str(e)}")
+                continue
+
+        progress_bar.progress(1.0, "Complete!")
+        return results
+
+    except Exception as e:
+        st.error(f"Error in story generation process: {str(e)}")
+        return []
+
+def display_story(image_url: str, story_line: str, story: str, index: int):
+    st.subheader(f"Story {index}")
     
-    with st.spinner("Generating story prompts..."):
+    col1, col2 = st.columns([1, 1])
+    
+    with col1:
         try:
-            story_prompts = generate_story_prompts(topic)
-            st.success("Story prompts generated successfully")
-            
-            for i, (story_line, image_prompt) in enumerate(story_prompts.items(), 1):
-                st.write(f"\nProcessing story {i}/2...")
-                
-                try:
-                    with st.spinner(f"Generating image {i}..."):
-                        image_url = generate_image(image_prompt)
-                        st.success(f"Image {i} generated successfully")
-                    
-                    with st.spinner(f"Generating story {i}..."):
-                        story = generate_story(image_prompt, story_line)
-                        st.success(f"Story {i} generated successfully")
-                    
-                    results.append((image_url, story_line, story))
-                    
-                except Exception as e:
-                    st.error(f"Error processing story {i}: {str(e)}")
-                    continue
-            
-            return results
-            
+            response = requests.get(image_url)
+            img = Image.open(BytesIO(response.content))
+            st.image(img, caption=f"Generated Image {index}", use_column_width=True)
         except Exception as e:
-            st.error(f"Error in story generation process: {str(e)}")
-            return []
+            st.error(f"Unable to display image. Error: {str(e)}")
+            st.write(f"Image URL: {image_url}")
+    
+    with col2:
+        st.write("**Story Line:**")
+        st.write(story_line)
+        st.write("**Story:**")
+        st.write(story)
 
 def main():
-    st.set_page_config(page_title="Story Generator", page_icon="📚")
+    st.set_page_config(page_title="AI Story Generator", layout="wide")
     
-    st.title("📚 AI Story Generator")
-    st.write("Generate unique stories with matching images based on your topic!")
-    
-    # Input section
+    st.title("AI Story Generator")
+    st.write("Generate unique stories with AI-generated images based on your topic!")
+
+    # API key input
+    api_key = st.text_input("Enter your Together AI API key:", type="password")
+    if api_key:
+        together.api_key = api_key
+
+    # Topic input
     topic = st.text_input("Enter a topic for your stories:", 
                          placeholder="e.g., A magical forest where animals play musical instruments")
-    
-    num_stories = st.slider("Number of story pairs to generate:", 
-                           min_value=1, max_value=3, value=1)
-    
-    if st.button("Generate Stories", type="primary"):
-        if not topic:
-            st.warning("Please enter a topic first!")
-            return
-            
+
+    if st.button("Generate Stories") and topic and api_key:
+        progress_bar = st.progress(0)
+        
         try:
-            for i in range(num_stories):
-                st.write(f"\n## Story Set {i+1}")
-                results = create_multi_story_app(topic)
+            results = create_multi_story_app(topic, progress_bar)
+            
+            if results:
+                st.success("Stories generated successfully!")
+                for i, (image_url, story_line, story) in enumerate(results, 1):
+                    st.markdown("---")
+                    display_story(image_url, story_line, story, i)
+            else:
+                st.warning("No stories were generated. Please try again.")
                 
-                if results:
-                    for j, (image_url, story_line, story) in enumerate(results, 1):
-                        st.subheader(f"Story {j}")
-                        st.write(f"**Story Line:** {story_line}")
-                        
-                        col1, col2 = st.columns([1, 1])
-                        with col1:
-                            st.image(image_url, caption="Generated Image", use_column_width=True)
-                        with col2:
-                            st.write("**Story:**")
-                            st.write(story)
-                        
-                        st.divider()
-                else:
-                    st.error("No stories were generated successfully. Please try again later.")
-                    
         except Exception as e:
             st.error(f"An error occurred: {str(e)}")
-            st.write("\n**Troubleshooting tips:**")
-            st.write("1. Current rate limits are hitting the maximum. Please wait 5-10 minutes before trying again.")
-            st.write("2. Consider reducing the number of stories if the issue persists.")
-            st.write("3. Check your Together AI account status and limits.")
+            st.write("\nTroubleshooting tips:")
+            st.write("1. Check if you've entered a valid Together AI API key")
+            st.write("2. Wait a few minutes if you've hit rate limits")
+            st.write("3. Try generating fewer stories if the issue persists")
+    
+    st.markdown("---")
+    st.markdown("Created with ❤️ using Together AI APIs")
 
 if __name__ == "__main__":
     main()
