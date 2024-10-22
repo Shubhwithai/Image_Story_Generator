@@ -6,7 +6,7 @@ import json
 import random
 from datetime import datetime
 from typing import Dict, List, Tuple
-import together
+from openai import OpenAI
 from PIL import Image
 import requests
 from io import BytesIO
@@ -40,6 +40,12 @@ class RateLimitHandler:
 
 rate_limiter = RateLimitHandler()
 
+def initialize_together_client(api_key: str) -> OpenAI:
+    return OpenAI(
+        api_key=api_key,
+        base_url="https://api.together.xyz/v1"
+    )
+
 def safe_api_call(func, *args, **kwargs):
     for attempt in range(rate_limiter.max_retries):
         try:
@@ -52,7 +58,7 @@ def safe_api_call(func, *args, **kwargs):
             raise e
     raise Exception("Max retries exceeded")
 
-def generate_story_prompts(topic: str) -> Dict[str, str]:
+def generate_story_prompts(client: OpenAI, topic: str) -> Dict[str, str]:
     prompt = {
         "role": "user",
         "content": f"""Create 2 related story lines and image prompts about: {topic}
@@ -64,7 +70,7 @@ def generate_story_prompts(topic: str) -> Dict[str, str]:
     }
 
     def make_request():
-        response = together.chat.completions.create(
+        response = client.chat.completions.create(
             model="meta-llama/Llama-Vision-Free",
             messages=[prompt]
         )
@@ -72,9 +78,9 @@ def generate_story_prompts(topic: str) -> Dict[str, str]:
 
     return safe_api_call(make_request)
 
-def generate_image(prompt: str) -> str:
+def generate_image(client: OpenAI, prompt: str) -> str:
     def make_request():
-        response = together.images.generate(
+        response = client.images.generate(
             model="black-forest-labs/FLUX.1-schnell-Free",
             prompt=prompt,
         )
@@ -82,14 +88,14 @@ def generate_image(prompt: str) -> str:
 
     return safe_api_call(make_request)
 
-def generate_story(image_prompt: str, story_line: str) -> str:
+def generate_story(client: OpenAI, image_prompt: str, story_line: str) -> str:
     prompt = f"""Write a short story (100 words) that combines these elements:
     1. Scene description: {image_prompt}
     2. Story line: {story_line}
     Make the story vivid and descriptive, as if describing a scene from a painting."""
 
     def make_request():
-        response = together.chat.completions.create(
+        response = client.chat.completions.create(
             model="meta-llama/Llama-Vision-Free",
             messages=[{"role": "user", "content": prompt}]
         )
@@ -97,19 +103,19 @@ def generate_story(image_prompt: str, story_line: str) -> str:
 
     return safe_api_call(make_request)
 
-def create_multi_story_app(topic: str, progress_bar) -> List[Tuple[str, str, str]]:
+def create_multi_story_app(client: OpenAI, topic: str, progress_bar) -> List[Tuple[str, str, str]]:
     try:
         progress_bar.progress(0.1, "Generating story prompts...")
-        story_prompts = generate_story_prompts(topic)
+        story_prompts = generate_story_prompts(client, topic)
         
         results = []
         for i, (story_line, image_prompt) in enumerate(story_prompts.items(), 1):
             try:
                 progress_bar.progress(0.2 + (i-1)*0.4, f"Generating image {i}...")
-                image_url = generate_image(image_prompt)
+                image_url = generate_image(client, image_prompt)
 
                 progress_bar.progress(0.3 + (i-1)*0.4, f"Generating story {i}...")
-                story = generate_story(image_prompt, story_line)
+                story = generate_story(client, image_prompt, story_line)
 
                 results.append((image_url, story_line, story))
 
@@ -152,18 +158,17 @@ def main():
 
     # API key input
     api_key = st.text_input("Enter your Together AI API key:", type="password")
-    if api_key:
-        together.api_key = api_key
-
+    
     # Topic input
     topic = st.text_input("Enter a topic for your stories:", 
                          placeholder="e.g., A magical forest where animals play musical instruments")
 
     if st.button("Generate Stories") and topic and api_key:
-        progress_bar = st.progress(0)
-        
         try:
-            results = create_multi_story_app(topic, progress_bar)
+            client = initialize_together_client(api_key)
+            progress_bar = st.progress(0)
+            
+            results = create_multi_story_app(client, topic, progress_bar)
             
             if results:
                 st.success("Stories generated successfully!")
