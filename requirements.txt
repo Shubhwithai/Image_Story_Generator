@@ -5,3 +5,4 @@ Pillow==10.2.0
 requests==2.31.0
 datetime==5.4
 typing==3.7.4.3
+openai
