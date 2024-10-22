@@ -1,5 +1,3 @@
-# app.py
-
 import streamlit as st
 import time
 import json
@@ -40,9 +38,9 @@ class RateLimitHandler:
 
 rate_limiter = RateLimitHandler()
 
-def initialize_together_client(api_key: str) -> OpenAI:
+def initialize_together_client() -> OpenAI:
     return OpenAI(
-        api_key=api_key,
+        api_key=st.secrets["TOGETHER_API_KEY"],
         base_url="https://api.together.xyz/v1"
     )
 
@@ -159,16 +157,13 @@ def main():
     st.title("AI Story Generator")
     st.write("Generate three unique stories with AI-generated images based on your topic!")
 
-    # API key input
-    api_key = st.text_input("Enter your Together AI API key:", type="password")
-    
     # Topic input
     topic = st.text_input("Enter a topic for your stories:", 
                          placeholder="e.g., A magical forest where animals play musical instruments")
 
-    if st.button("Generate Stories") and topic and api_key:
+    if st.button("Generate Stories") and topic:
         try:
-            client = initialize_together_client(api_key)
+            client = initialize_together_client()
             progress_bar = st.progress(0)
             
             with st.spinner('Generating your stories and images... This may take a few minutes.'):
@@ -185,7 +180,7 @@ def main():
         except Exception as e:
             st.error(f"An error occurred: {str(e)}")
             st.write("\nTroubleshooting tips:")
-            st.write("1. Check if you've entered a valid Together AI API key")
+            st.write("1. Check if the secrets.toml file is properly configured")
             st.write("2. Wait a few minutes if you've hit rate limits")
             st.write("3. Try generating fewer stories if the issue persists")
     
