@@ -185,7 +185,7 @@ def main():
             st.write("3. Try generating fewer stories if the issue persists")
     
     st.markdown("---")
-    st.markdown("Created with ❤️ using Together AI APIs")
+    st.markdown("Created with ❤️ By BuildFastWithAI")
 
 if __name__ == "__main__":
     main()
