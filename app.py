@@ -59,7 +59,7 @@ def safe_api_call(func, *args, **kwargs):
 def generate_story_prompts(client: OpenAI, topic: str) -> Dict[str, str]:
     prompt = {
         "role": "user",
-        "content": f"""Create 3 related story lines and image prompts about: {topic}
+        "content": f"""Create 3 story lines and image prompts about: {topic}
         Return only a JSON object with this structure:
         {{
             "story_line_1": "image_prompt_1",
